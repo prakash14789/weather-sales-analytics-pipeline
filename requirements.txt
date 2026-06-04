@@ -1,0 +1,14 @@
+requests==2.33.1
+pandas
+numpy
+
+pyspark
+
+psycopg2-binary
+sqlalchemy
+
+python-dotenv
+
+jupyter
+
+pytest
