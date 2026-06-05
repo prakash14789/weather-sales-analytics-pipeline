@@ -9,35 +9,98 @@ load_dotenv()
 
 API_KEY = os.getenv("CALENDARIFIC_API_KEY")
 
-url = (
-    f"https://calendarific.com/api/v2/holidays"
-    f"?api_key={API_KEY}"
-    f"&country=US"
-    f"&year=2017"
-)
+years = [2014, 2015, 2016, 2017]
 
-response = requests.get(url)
+# Holidays that actually impact retail sales
+SALES_HOLIDAYS = [
+    # Federal Holidays
+    "New Year's Day",
+    "Martin Luther King Jr. Day",
+    "Presidents' Day",
+    "Memorial Day",
+    "Independence Day",
+    "Labor Day",
+    "Columbus Day",
+    "Veterans Day",
+    "Thanksgiving Day",
+    "Christmas Day",
 
-print("Status Code:", response.status_code)
+    # Key Observances that drive shopping
+    "Valentine's Day",
+    "Mother's Day",
+    "Father's Day",
+]
 
-if response.status_code == 200:
+all_holidays = []
 
-    holiday_data = response.json()
+for year in years:
 
-    with open(
-        "data/raw/api/holidays.json",
-        "w",
-        encoding="utf-8"
-    ) as file:
-        json.dump(
-            holiday_data,
-            file,
-            indent=4,
-            ensure_ascii=False
-        )
+    print(f"\nFetching holidays for {year}...")
 
-    print("Holiday data saved successfully!")
+    url = (
+        f"https://calendarific.com/api/v2/holidays"
+        f"?api_key={API_KEY}"
+        f"&country=US"
+        f"&year={year}"
+    )
 
-else:
-    print("Failed to fetch data")
-    print(response.text)
+    response = requests.get(url)
+
+    print(f"Status Code ({year}):", response.status_code)
+
+    if response.status_code == 200:
+
+        data = response.json()
+
+        holidays = data["response"]["holidays"]
+
+        # Filter: keep only sales-impacting holidays
+        filtered = [
+            h for h in holidays
+            if h["name"] in SALES_HOLIDAYS
+        ]
+
+        # Remove duplicates (same holiday appears
+        # for multiple states like Veterans Day /
+        # Veterans Day substitute)
+        seen = set()
+        unique = []
+        for h in filtered:
+            key = (h["name"], h["date"]["iso"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(h)
+
+        print(f"{year}: {len(unique)} sales holidays found")
+
+        for h in unique:
+            print(f"  - {h['date']['iso']}  {h['name']}")
+
+        all_holidays.extend(unique)
+
+    else:
+
+        print(f"Failed for year {year}")
+        print(response.text)
+
+output = {
+    "holidays": all_holidays
+}
+
+with open(
+    "data/raw/api/holidays.json",
+    "w",
+    encoding="utf-8"
+) as file:
+
+    json.dump(
+        output,
+        file,
+        indent=4,
+        ensure_ascii=False
+    )
+
+print("\n===================================")
+print(f"Total Sales Holidays Saved: {len(all_holidays)}")
+print("Saved to: data/raw/api/holidays.json")
+print("===================================")
