@@ -2,6 +2,11 @@ import pandas as pd
 from sqlalchemy import create_engine
 from urllib.parse import quote_plus
 
+import os
+
+os.environ["PYSPARK_PYTHON"] = "python"
+os.environ["PYSPARK_DRIVER_PYTHON"] = "python"
+
 from pyspark.sql import SparkSession
 
 import sys

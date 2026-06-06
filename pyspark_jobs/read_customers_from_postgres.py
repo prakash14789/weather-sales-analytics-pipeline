@@ -18,10 +18,10 @@ spark = (
     .appName("Holiday Analytics")
     .config("spark.driver.host", "127.0.0.1")
     .config("spark.driver.bindAddress", "127.0.0.1")
-    # .config(
-    #     "spark.jars",
-    #     "drivers/postgresql-42.7.11.jar"
-    # )
+    .config(
+        "spark.jars",
+        "drivers/postgresql-42.7.11.jar"
+    )
     .getOrCreate()
 )
 

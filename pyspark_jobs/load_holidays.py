@@ -1,27 +1,5 @@
-# from pyspark.sql import SparkSession
 
-# spark = (
-#     SparkSession.builder
-#     .master("local[1]")
-#     .appName("Holiday Analytics")
-#     .config("spark.driver.host", "127.0.0.1")
-#     .config("spark.driver.bindAddress", "127.0.0.1")
-#     .getOrCreate()
-# )
 
-# holiday_df = (
-#     spark.read
-#     .option("multiline", "true")
-#     .json("data/raw/api/holidays.json")
-# )
-
-# print("\nSchema:")
-# holiday_df.printSchema()
-
-# print("\nData:")
-# holiday_df.show(truncate=False)
-
-# spark.stop()
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import explode
@@ -43,7 +21,7 @@ holiday_df = (
 
 # Extract holiday array
 holidays = holiday_df.select(
-    explode("response.holidays").alias("holiday")
+    explode("holidays").alias("holiday")
 )
 
 # Flatten fields

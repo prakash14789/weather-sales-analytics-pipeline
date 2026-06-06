@@ -25,7 +25,8 @@ from pyspark.sql.functions import (
     year,
     quarter,
     dayofweek,
-    round
+    round,
+    regexp_replace
 )
 
 spark = (
@@ -45,7 +46,7 @@ spark = (
 # SALES DATA (CSV)
 # ==================================================
 
-sales_df = spark.read.csv(
+sales_df = spark.read.option("encoding", "ISO-8859-1").csv(
     "data/raw/csv/Sample - Superstore.csv",
     header=True,
     inferSchema=True,
@@ -55,6 +56,17 @@ sales_df = spark.read.csv(
 sales_df = sales_df.withColumn(
     "Order Date",
     to_date(col("Order Date"), "M/d/yyyy")
+).withColumn(
+    "Product Name",
+    regexp_replace(
+        regexp_replace(
+            regexp_replace(col("Product Name"), ",", " -"),
+            "[\\u0093\\u0094]",
+            "\""
+        ),
+        "[\\u00a0]",
+        " "
+    )
 )
 
 # ==================================================
@@ -209,13 +221,54 @@ final_df.select(
 # SAVE OUTPUT
 # ==================================================
 
+import shutil
+import glob
+
+temp_dir = "data/processed/final_analytics_temp"
+dest_dir = "data/processed/final_analytics"
+
+# Write Spark output to temp directory
 final_df.coalesce(1).write.mode("overwrite").option(
     "header",
     True
+).option(
+    "nullValue",
+    "null"
+).option(
+    "escape",
+    "\""
 ).csv(
-    "data/processed/final_analytics"
+    temp_dir
 )
 
-print("\nFinal dataset saved successfully!")
+print("\nFinal dataset generated successfully in temp folder!")
 
 spark.stop()
+
+# Ensure destination directory exists
+os.makedirs(dest_dir, exist_ok=True)
+
+# Remove any existing files in final directory
+for f in glob.glob(os.path.join(dest_dir, "*")):
+    try:
+        if os.path.isfile(f):
+            os.remove(f)
+        elif os.path.isdir(f):
+            shutil.rmtree(f)
+    except Exception as e:
+        print(f"Warning: Could not remove old file {f}: {e}")
+
+# Move new files from temp directory to final directory
+for f in glob.glob(os.path.join(temp_dir, "*")):
+    try:
+        shutil.move(f, dest_dir)
+    except Exception as e:
+        print(f"Error: Could not move file {f} to {dest_dir}: {e}")
+
+# Clean up temp directory
+try:
+    shutil.rmtree(temp_dir)
+except Exception as e:
+    print(f"Warning: Could not remove temp directory {temp_dir}: {e}")
+
+print("Final dataset moved to destination and saved successfully!")
