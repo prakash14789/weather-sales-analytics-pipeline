@@ -42,6 +42,7 @@ graph TD
     %% Output Generation
     SparkETL -->|Data Cleaning, Joins, and Feature Engineering| OutCSV[data/processed/final_analytics/part-00000-*.csv]
     PostgresDim -->|fetch_customer_dim.py| ProcDimCSV(data/processed/customer_dim.csv)
+    OutCSV -->|load_final_analytics_to_postgres.py| PostgresFinal[(PostgreSQL: final_analytics table)]
 ```
 
 ---
@@ -137,6 +138,7 @@ holiday_analytics_pipeline/
 │   ├── load_customers.py             # SQLAlchemy + Spark check on 'customers' table
 │   ├── read_customers_from_postgres.py # JDBC reading from 'customers' table in Spark
 │   ├── fetch_customer_dim.py         # Exports PostgreSQL 'customer_dim' to a CSV file
+│   ├── load_final_analytics_to_postgres.py # Loads feature engineered CSV into PostgreSQL final_analytics table
 │   └── feature_engineering.py        # The final pipeline executable joining CSV + JSON + JDBC
 │
 ├── sql/
@@ -177,6 +179,7 @@ Here is the purpose and rationale behind each of the core files created in the p
 * **[pyspark_jobs/data_cleaning.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/data_cleaning.py)**: Validates raw data fields in the sales dataset by converting date strings to proper date formats, casting money and quantities to numeric formats, and logging missing or duplicate records.
 * **[pyspark_jobs/data_integration.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/data_integration.py)**: Integrates the cleaned Sales dataset with the Holidays dataset to analyze orders placed on specific holiday dates.
 * **[pyspark_jobs/feature_engineering.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/feature_engineering.py)**: **The final pipeline orchestrator**. It integrates Sales CSV, PostgreSQL JDBC customer dimensions (`customer_dim`), and Holidays API JSON. It performs multi-dataset joins, handles schema mappings, cleans data, engineers holiday features, and outputs a single clean dataset to `data/processed/final_analytics/`.
+* **[pyspark_jobs/load_final_analytics_to_postgres.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_final_analytics_to_postgres.py)**: Loads the final analytical dataset from the local filesystem (`data/processed/final_analytics/`) directly into the `final_analytics` table in the PostgreSQL database using Pandas and SQLAlchemy. It formats column names to lowercase snake_case and ensures date columns are loaded with correct datatypes.
 
 ---
 
@@ -278,9 +281,17 @@ Run the main ETL Spark pipeline which joins the datasets, engineers analytics fe
 python pyspark_jobs/feature_engineering.py
 ```
 
-### Step 6: Verify Outputs
+### Step 6: Load Final Analytics to PostgreSQL
+Load the feature-engineered final CSV data into the PostgreSQL `final_analytics` table:
+```bash
+python pyspark_jobs/load_final_analytics_to_postgres.py
+```
+Result: Reads the generated CSV file, cleans and formats column names to lowercase snake_case, casts dates appropriately, and creates/replaces the `final_analytics` table in PostgreSQL.
+
+### Step 7: Verify Outputs
 Once the scripts complete successfully, check the following outputs:
 * **Spark Final Output:** Look inside `data/processed/final_analytics/`. You should see a successful run indicated by a `_SUCCESS` file and a large `.csv` data partition file (containing the final merged, feature-engineered table).
+* **PostgreSQL final_analytics Table:** Verify that the `final_analytics` table exists and is populated in your `retail_dw` database.
 * **Exported PostgreSQL Check:** (Optional) Run the fetch script to download the database's dimension table into a local file:
   ```bash
   python pyspark_jobs/fetch_customer_dim.py
