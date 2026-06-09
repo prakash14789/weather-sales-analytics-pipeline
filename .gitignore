@@ -10,3 +10,13 @@ data/processed/
 .ipynb_checkpoints/
 
 .DS_Store
+
+# Tableau temporary files
+~*__*.twbr
+~$*.twb
+~$*.twbx
+
+# Windows system files
+desktop.ini
+desktop.ini.lnk
+Thumbs.db

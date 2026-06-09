@@ -107,7 +107,9 @@ holiday_analytics_pipeline/
 ├── config/
 │   └── config.py                     # Configuration loader module for database credentials
 │
-├── dashboards/                       # (Placeholder) Reserved for future visualization layers
+├── dashboards/                       # Interactive visualization layers
+│   ├── power_bi/                     # Power BI dashboard files and configuration
+│   └── tableau/                      # Tableau dashboard files and configuration
 │
 ├── data/
 │   ├── raw/
