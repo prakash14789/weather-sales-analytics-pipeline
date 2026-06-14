@@ -31,76 +31,86 @@ SALES_HOLIDAYS = [
     "Father's Day",
 ]
 
-all_holidays = []
-
-for year in years:
-
-    print(f"\nFetching holidays for {year}...")
-
+def fetch_holidays_from_api(api_key, year):
+    """
+    Fetches raw holidays from Calendarific API for the given year.
+    Returns a tuple of (status_code, json_response_dict_or_none).
+    """
     url = (
         f"https://calendarific.com/api/v2/holidays"
-        f"?api_key={API_KEY}"
+        f"?api_key={api_key}"
         f"&country=US"
         f"&year={year}"
     )
-
     response = requests.get(url)
-
-    print(f"Status Code ({year}):", response.status_code)
-
     if response.status_code == 200:
+        return response.status_code, response.json()
+    return response.status_code, None
 
-        data = response.json()
+def filter_and_deduplicate(holidays, sales_holidays=SALES_HOLIDAYS):
+    """
+    Filters holidays keeping only those in sales_holidays, and removes duplicates
+    based on (name, date_iso).
+    """
+    filtered = [
+        h for h in holidays
+        if h.get("name") in sales_holidays
+    ]
+    seen = set()
+    unique = []
+    for h in filtered:
+        date_obj = h.get("date", {})
+        iso_date = date_obj.get("iso")
+        name = h.get("name")
+        if not iso_date or not name:
+            continue
+        key = (name, iso_date)
+        if key not in seen:
+            seen.add(key)
+            unique.append(h)
+    return unique
 
-        holidays = data["response"]["holidays"]
+def main():
+    all_holidays = []
 
-        # Filter: keep only sales-impacting holidays
-        filtered = [
-            h for h in holidays
-            if h["name"] in SALES_HOLIDAYS
-        ]
+    for year in years:
+        print(f"\nFetching holidays for {year}...")
+        status_code, data = fetch_holidays_from_api(API_KEY, year)
+        print(f"Status Code ({year}):", status_code)
 
-        # Remove duplicates (same holiday appears
-        # for multiple states like Veterans Day /
-        # Veterans Day substitute)
-        seen = set()
-        unique = []
-        for h in filtered:
-            key = (h["name"], h["date"]["iso"])
-            if key not in seen:
-                seen.add(key)
-                unique.append(h)
+        if status_code == 200 and data:
+            holidays = data.get("response", {}).get("holidays", [])
+            unique = filter_and_deduplicate(holidays)
+            print(f"{year}: {len(unique)} sales holidays found")
+            for h in unique:
+                print(f"  - {h['date']['iso']}  {h['name']}")
+            all_holidays.extend(unique)
+        else:
+            print(f"Failed for year {year}")
+            if data:
+                print(data)
 
-        print(f"{year}: {len(unique)} sales holidays found")
+    output = {
+        "holidays": all_holidays
+    }
 
-        for h in unique:
-            print(f"  - {h['date']['iso']}  {h['name']}")
+    os.makedirs("data/raw/api", exist_ok=True)
+    with open(
+        "data/raw/api/holidays.json",
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(
+            output,
+            file,
+            indent=4,
+            ensure_ascii=False
+        )
 
-        all_holidays.extend(unique)
+    print("\n===================================")
+    print(f"Total Sales Holidays Saved: {len(all_holidays)}")
+    print("Saved to: data/raw/api/holidays.json")
+    print("===================================")
 
-    else:
-
-        print(f"Failed for year {year}")
-        print(response.text)
-
-output = {
-    "holidays": all_holidays
-}
-
-with open(
-    "data/raw/api/holidays.json",
-    "w",
-    encoding="utf-8"
-) as file:
-
-    json.dump(
-        output,
-        file,
-        indent=4,
-        ensure_ascii=False
-    )
-
-print("\n===================================")
-print(f"Total Sales Holidays Saved: {len(all_holidays)}")
-print("Saved to: data/raw/api/holidays.json")
-print("===================================")
+if __name__ == "__main__":
+    main()
