@@ -164,7 +164,7 @@ def test_join_sales_holidays(spark_session):
     assert row_non_holiday["holiday_name"] is None
 
 def test_engineer_features(spark_session):
-    """Verifies features calculation like profit margin, holiday flag and weekend flag."""
+    """Verifies features calculation like profit margin, holiday flag, weekend flag, season flags, proximity, and rolling averages."""
     schema = StructType([
         StructField("holiday_name", StringType(), True),
         StructField("Order Date", DateType(), True),
@@ -175,35 +175,65 @@ def test_engineer_features(spark_session):
     # 2014-11-27 is a Thursday (Thanksgiving)
     # 2014-11-28 is a Friday (Regular day)
     # 2014-11-30 is a Sunday (Weekend)
+    # 2014-08-15 is a Friday (Back to school season)
     raw_data = [
         ("Thanksgiving Day", date(2014, 11, 27), 100.0, 25.0),
         (None, date(2014, 11, 28), 200.0, -10.00),
-        (None, date(2014, 11, 30), 50.0, 10.15)
+        (None, date(2014, 11, 30), 50.0, 10.15),
+        (None, date(2014, 8, 15), 80.0, 20.0)
     ]
     
+    holiday_dates = [date(2014, 11, 27), date(2014, 12, 25)]
+    thanksgiving_by_year = {2014: date(2014, 11, 27)}
+    
     df = spark_session.createDataFrame(raw_data, schema)
-    engineered_df = engineer_features(df)
-    results = engineered_df.collect()
+    engineered_df = engineer_features(df, holiday_dates, thanksgiving_by_year)
+    results = engineered_df.orderBy("Order Date").collect()
     
-    # Verify Holiday Flag
-    assert results[0]["holiday_flag"] == 1
-    assert results[1]["holiday_flag"] == 0
-    assert results[2]["holiday_flag"] == 0
-    
-    # Verify Month, Year, Quarter
-    assert results[0]["month"] == 11
+    # 1. Verify 2014-08-15
+    assert results[0]["Order Date"] == date(2014, 8, 15)
+    assert results[0]["holiday_flag"] == 0
+    assert results[0]["month"] == 8
     assert results[0]["year"] == 2014
-    assert results[0]["quarter"] == 4
-    
-    # Verify Weekend Flag
-    # Thursday is weekday -> 0
-    # Friday is weekday -> 0
-    # Sunday is weekend -> 1
+    assert results[0]["quarter"] == 3
     assert results[0]["weekend_flag"] == 0
-    assert results[1]["weekend_flag"] == 0
-    assert results[2]["weekend_flag"] == 1
-    
-    # Verify Profit Margin
     assert results[0]["profit_margin"] == 25.0
-    assert results[1]["profit_margin"] == -5.0
-    assert results[2]["profit_margin"] == 20.30
+    assert results[0]["back_to_school_flag"] == 1
+    assert results[0]["holiday_shopping_season_flag"] == 0
+    assert results[0]["days_until_next_holiday"] == 104
+    assert results[0]["days_since_last_holiday"] is None
+    assert results[0]["rolling_sales_7d"] == 80.0
+    assert results[0]["rolling_sales_30d"] == 80.0
+
+    # 2. Verify 2014-11-27
+    assert results[1]["Order Date"] == date(2014, 11, 27)
+    assert results[1]["holiday_flag"] == 1
+    assert results[1]["month"] == 11
+    assert results[1]["year"] == 2014
+    assert results[1]["quarter"] == 4
+    assert results[1]["weekend_flag"] == 0
+    assert results[1]["profit_margin"] == 25.0
+    assert results[1]["back_to_school_flag"] == 0
+    assert results[1]["holiday_shopping_season_flag"] == 1
+    assert results[1]["days_until_next_holiday"] == 0
+    assert results[1]["days_since_last_holiday"] == 0
+    assert results[1]["rolling_sales_7d"] == 100.0
+
+    # 3. Verify 2014-11-28
+    assert results[2]["Order Date"] == date(2014, 11, 28)
+    assert results[2]["holiday_flag"] == 0
+    assert results[2]["back_to_school_flag"] == 0
+    assert results[2]["holiday_shopping_season_flag"] == 1
+    assert results[2]["days_until_next_holiday"] == 27
+    assert results[2]["days_since_last_holiday"] == 1
+    assert results[2]["rolling_sales_7d"] == 150.0
+
+    # 4. Verify 2014-11-30
+    assert results[3]["Order Date"] == date(2014, 11, 30)
+    assert results[3]["holiday_flag"] == 0
+    assert results[3]["weekend_flag"] == 1
+    assert results[3]["holiday_shopping_season_flag"] == 1
+    assert results[3]["days_until_next_holiday"] == 25
+    assert results[3]["days_since_last_holiday"] == 3
+    assert results[3]["rolling_sales_7d"] == 116.67
+    assert results[3]["rolling_sales_30d"] == 116.67
