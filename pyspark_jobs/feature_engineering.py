@@ -35,9 +35,11 @@ from pyspark.sql.functions import (
     dayofmonth,
     sum as spark_sum,
     avg as spark_avg,
-    udf
+    udf,
+    coalesce,
+    lit
 )
-from pyspark.sql.types import IntegerType
+from pyspark.sql.types import IntegerType, DoubleType
 
 # ==================================================
 # MODULAR FUNCTIONS FOR ETL AND FEATURE ENGINEERING
@@ -111,6 +113,30 @@ def join_sales_holidays(sales_customer_df, holidays_df):
             holidays_df["holiday_date"],
             "left"
         )
+    )
+
+def join_sales_weather(sales_df, weather_df):
+    """
+    Left-joins Sales+Customer+Holiday DataFrame with Weather DataFrame on Date and Region.
+    """
+    cleaned_weather_df = weather_df.select(
+        to_date(col("weather_date")).alias("w_date"),
+        col("weather_region").alias("w_region"),
+        col("temp_c").cast("double").alias("temp_c"),
+        col("precipitation_mm").cast("double").alias("precipitation_mm"),
+        col("snowfall_cm").cast("double").alias("snowfall_cm"),
+        col("wind_speed_kmh").cast("double").alias("wind_speed_kmh")
+    )
+    
+    join_region = coalesce(col("db_region"), col("Region"))
+    
+    return (
+        sales_df.join(
+            cleaned_weather_df,
+            (sales_df["Order Date"] == cleaned_weather_df["w_date"]) &
+            (join_region == cleaned_weather_df["w_region"]),
+            "left"
+        ).drop("w_date", "w_region")
     )
 
 def load_holiday_metadata_from_json(json_path="data/raw/api/holidays.json"):
@@ -274,6 +300,30 @@ def engineer_features(final_df, holiday_dates=None, thanksgiving_by_year=None):
         how="left"
     )
 
+    # 5. Weather Features
+    weather_cols = ["temp_c", "precipitation_mm", "snowfall_cm", "wind_speed_kmh"]
+    for c in weather_cols:
+        if c not in final_df.columns:
+            final_df = final_df.withColumn(c, lit(None).cast(DoubleType()))
+            
+    final_df = final_df.withColumn(
+        "is_raining",
+        when(col("precipitation_mm").isNotNull() & (col("precipitation_mm") > 0.0), 1).otherwise(0)
+    )
+    final_df = final_df.withColumn(
+        "is_snowing",
+        when(col("snowfall_cm").isNotNull() & (col("snowfall_cm") > 0.0), 1).otherwise(0)
+    )
+    final_df = final_df.withColumn(
+        "extreme_weather_flag",
+        when(
+            (col("precipitation_mm").isNotNull() & (col("precipitation_mm") > 25.0)) |
+            (col("snowfall_cm").isNotNull() & (col("snowfall_cm") > 5.0)) |
+            (col("wind_speed_kmh").isNotNull() & (col("wind_speed_kmh") > 40.0)),
+            1
+        ).otherwise(0)
+    )
+
     return final_df
 
 # ==================================================
@@ -339,6 +389,19 @@ def main():
     # 6. Join Sales + Customer + Holidays
     print("Joining holidays...")
     final_df = join_sales_holidays(sales_customer_df, holidays_df)
+
+    # 6.5 Load and Join Weather Data
+    print("Loading weather data from JSON...")
+    try:
+        weather_raw_df = (
+            spark.read
+            .option("multiline", "true")
+            .json("data/raw/api/weather.json")
+        )
+        final_df = join_sales_weather(final_df, weather_raw_df)
+        print("Weather data joined successfully.")
+    except Exception as e:
+        print(f"Warning: Could not load/join weather data: {e}")
 
     # 7. Feature Engineering
     print("Performing feature engineering...")

@@ -16,6 +16,7 @@ from pyspark_jobs.feature_engineering import (
     prepare_holidays,
     join_sales_customers,
     join_sales_holidays,
+    join_sales_weather,
     engineer_features
 )
 
@@ -237,3 +238,97 @@ def test_engineer_features(spark_session):
     assert results[3]["days_since_last_holiday"] == 3
     assert results[3]["rolling_sales_7d"] == 116.67
     assert results[3]["rolling_sales_30d"] == 116.67
+
+    # Verify fallback weather columns when input has no weather columns
+    for r in results:
+        assert r["temp_c"] is None
+        assert r["is_raining"] == 0
+        assert r["is_snowing"] == 0
+        assert r["extreme_weather_flag"] == 0
+
+def test_join_sales_weather(spark_session):
+    """Verifies sales and weather join on date and region."""
+    sales_schema = StructType([
+        StructField("Order Date", DateType(), True),
+        StructField("Region", StringType(), True),
+        StructField("db_region", StringType(), True)
+    ])
+    sales_data = [
+        (date(2014, 11, 27), "Central", "East"),
+        (date(2014, 11, 28), "West", None),
+        (date(2014, 11, 29), "South", "South")
+    ]
+    
+    weather_schema = StructType([
+        StructField("weather_date", StringType(), True),
+        StructField("weather_region", StringType(), True),
+        StructField("temp_c", DoubleType(), True),
+        StructField("precipitation_mm", DoubleType(), True),
+        StructField("snowfall_cm", DoubleType(), True),
+        StructField("wind_speed_kmh", DoubleType(), True)
+    ])
+    weather_data = [
+        ("2014-11-27", "East", 1.5, 0.0, 0.0, 10.0),
+        ("2014-11-28", "West", 15.0, 5.0, 0.0, 15.0),
+        ("2014-11-29", "East", 0.0, 0.0, 0.0, 0.0)
+    ]
+    
+    sales_df = spark_session.createDataFrame(sales_data, sales_schema)
+    weather_df = spark_session.createDataFrame(weather_data, weather_schema)
+    
+    joined_df = join_sales_weather(sales_df, weather_df)
+    results = list(sorted(joined_df.collect(), key=lambda r: r["Order Date"]))
+    
+    assert len(results) == 3
+    assert results[0]["temp_c"] == 1.5
+    assert results[1]["temp_c"] == 15.0
+    assert results[2]["temp_c"] is None
+
+def test_engineer_features_with_weather(spark_session):
+    """Verifies feature engineering calculation with weather metrics present."""
+    schema = StructType([
+        StructField("holiday_name", StringType(), True),
+        StructField("Order Date", DateType(), True),
+        StructField("Sales", DoubleType(), True),
+        StructField("Profit", DoubleType(), True),
+        StructField("temp_c", DoubleType(), True),
+        StructField("precipitation_mm", DoubleType(), True),
+        StructField("snowfall_cm", DoubleType(), True),
+        StructField("wind_speed_kmh", DoubleType(), True)
+    ])
+    
+    raw_data = [
+        ("Thanksgiving Day", date(2014, 11, 27), 100.0, 25.0, 1.5, 0.0, 0.0, 45.0), # extreme wind
+        (None, date(2014, 11, 28), 200.0, -10.00, 2.0, 0.0, 6.0, 15.0),            # snow > 5
+        (None, date(2014, 11, 30), 50.0, 10.15, 12.0, 0.0, 0.0, 10.0),             # regular
+        (None, date(2014, 8, 15), 80.0, 20.0, 22.5, 5.0, 0.0, 12.0)                # raining
+    ]
+    
+    df = spark_session.createDataFrame(raw_data, schema)
+    engineered_df = engineer_features(df, [], {})
+    results = list(sorted(engineered_df.collect(), key=lambda r: r["Order Date"]))
+    
+    # 1. 2014-08-15: rain
+    assert results[0]["Order Date"] == date(2014, 8, 15)
+    assert results[0]["is_raining"] == 1
+    assert results[0]["is_snowing"] == 0
+    assert results[0]["extreme_weather_flag"] == 0
+
+    # 2. 2014-11-27: extreme wind
+    assert results[1]["Order Date"] == date(2014, 11, 27)
+    assert results[1]["temp_c"] == 1.5
+    assert results[1]["is_raining"] == 0
+    assert results[1]["is_snowing"] == 0
+    assert results[1]["extreme_weather_flag"] == 1
+
+    # 3. 2014-11-28: snow
+    assert results[2]["Order Date"] == date(2014, 11, 28)
+    assert results[2]["is_raining"] == 0
+    assert results[2]["is_snowing"] == 1
+    assert results[2]["extreme_weather_flag"] == 1
+
+    # 4. 2014-11-30: regular
+    assert results[3]["Order Date"] == date(2014, 11, 30)
+    assert results[3]["is_raining"] == 0
+    assert results[3]["is_snowing"] == 0
+    assert results[3]["extreme_weather_flag"] == 0

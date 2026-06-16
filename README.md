@@ -17,10 +17,11 @@ An end-to-end data engineering pipeline designed to analyze the impact of key US
 
 ## Architecture & Data Flow
 
-The pipeline integrates data from three distinct source systems:
+The pipeline integrates data from four distinct source systems:
 1. **Raw CSV**: Flat-file transaction data containing retail orders, profits, and customer IDs.
-2. **REST API**: Dynamically requested holiday calendars from the [Calendarific API](https://calendarific.com/).
-3. **Relational Database (PostgreSQL)**: Customer master/dimension table queried via JDBC.
+2. **REST API (Calendarific)**: Dynamically requested holiday calendars from the [Calendarific API](https://calendarific.com/).
+3. **REST API (Open-Meteo)**: Historical weather archive data representing the region's climate matching customer locations.
+4. **Relational Database (PostgreSQL)**: Customer master/dimension table queried via JDBC.
 
 ### Pipeline Diagram
 
@@ -28,6 +29,7 @@ The pipeline integrates data from three distinct source systems:
 graph TD
     %% Source Ingestion
     API[Calendarific API] -->|fetch_holidays.py| RawJSON(data/raw/api/holidays.json)
+    WeatherAPI[Open-Meteo API] -->|fetch_weather.py| RawWeatherJSON(data/raw/api/weather.json)
     RawCSV[Sample - Superstore.csv] -->|main.py| ProcessedCust(data/processed/customers.csv)
     
     %% Database Loading
@@ -38,6 +40,7 @@ graph TD
     RawCSV -->|spark.read.csv| SparkETL[pyspark_jobs/feature_engineering.py]
     PostgresDim -->|JDBC Connection: postgresql-42.7.11.jar| SparkETL
     RawJSON -->|spark.read.json| SparkETL
+    RawWeatherJSON -->|spark.read.json| SparkETL
 
     %% Output Generation
     SparkETL -->|Data Cleaning, Joins, and Feature Engineering| OutCSV[data/processed/final_analytics/part-00000-*.csv]
@@ -102,7 +105,8 @@ holiday_analytics_pipeline/
 ├── requirements.txt                  # Python dependencies
 │
 ├── api/
-│   └── fetch_holidays.py             # Script to ingest holiday data from REST API
+│   ├── fetch_holidays.py             # Script to ingest holiday data from REST API
+│   └── fetch_weather.py              # Script to ingest historical weather data from API
 │
 ├── config/
 │   └── config.py                     # Configuration loader module for database credentials
@@ -116,7 +120,8 @@ holiday_analytics_pipeline/
 │   │   ├── csv/
 │   │   │   └── Sample - Superstore.csv  # Raw retail sales dataset
 │   │   └── api/
-│   │       └── holidays.json         # Downloaded holiday data from API
+│   │       ├── holidays.json         # Downloaded holiday data from API
+│   │       └── weather.json          # Downloaded weather data from API
 │   └── processed/
 │       ├── customers.csv             # Unique customers extracted from raw CSV
 │       ├── customer_dim.csv          # Exported customer dimension from PostgreSQL
@@ -148,8 +153,9 @@ holiday_analytics_pipeline/
 │   └── insert_customers.sql          # (Placeholder) Reserved for custom SQL insertions
 │
 └── tests/
-    ├── test_api.py                   # (Placeholder) API testing suite
-    └── test_pyspark.py               # (Placeholder) PySpark jobs testing suite
+    ├── test_api.py                   # API testing suite for holiday data
+    ├── test_weather_api.py           # API testing suite for weather data
+    └── test_pyspark.py               # PySpark jobs testing suite
 ```
 
 ---
@@ -166,6 +172,7 @@ Here is the purpose and rationale behind each of the core files created in the p
 ### 2. Pre-processing & API Ingestion
 * **[main.py](file:///c:/Users/mishr/holiday_analytics_pipeline/main.py)**: Reads the raw CSV file using Pandas, extracts unique customer rows based on their metadata (Customer ID, Name, Segment, City, etc.), and writes them to a processed customer CSV file.
 * **[api/fetch_holidays.py](file:///c:/Users/mishr/holiday_analytics_pipeline/api/fetch_holidays.py)**: Fetches holiday metadata from Calendarific's REST API for the years 2014–2017. It filters for sales-impacting holidays (like Thanksgiving, Christmas, Valentine's Day) and saves the raw response to `data/raw/api/holidays.json`.
+* **[api/fetch_weather.py](file:///c:/Users/mishr/holiday_analytics_pipeline/api/fetch_weather.py)**: Fetches historical daily weather statistics (mean temp, precipitation sum, snowfall sum, wind speed max) from Open-Meteo's Archive API for coordinates representing each major region (NYC, LA, Chicago, Atlanta) and saves it to `data/raw/api/weather.json`.
 
 ### 3. Database Utility Scripts
 * **[pyspark_jobs/load_customers_to_postgres.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_customers_to_postgres.py)**: Establishes a connection to PostgreSQL using SQLAlchemy and writes the unique customer listings CSV directly into the `customers` table, replacing it if it already exists.
@@ -253,19 +260,25 @@ Run the pipeline scripts in the following exact sequence:
    python api/fetch_holidays.py
    ```
 
-2. **Extract Customers from Sales CSV:**
+2. **Ingest Weather Data (API):**
+   Calls the Open-Meteo Archive API and populates `data/raw/api/weather.json`.
+   ```bash
+   python api/fetch_weather.py
+   ```
+
+3. **Extract Customers from Sales CSV:**
    Creates `data/processed/customers.csv`.
    ```bash
    python main.py
    ```
 
-3. **Load Extracted Customers to PostgreSQL:**
+4. **Load Extracted Customers to PostgreSQL:**
    Automatically creates the `customers` table in the database and loads the CSV data.
    ```bash
    python pyspark_jobs/load_customers_to_postgres.py
    ```
 
-4. **Populate Customer Dimension Table:**
+5. **Populate Customer Dimension Table:**
    Run the following query in your PostgreSQL database to populate `customer_dim` with unique customer profiles:
    ```sql
    -- Run in PostgreSQL tool (e.g. pgAdmin, psql, or DBeaver) inside 'retail_dw' database
@@ -315,6 +328,13 @@ The feature engineering job (`pyspark_jobs/feature_engineering.py`) adds the fol
 | `quarter` | Integer | Quarter of the year (1-4) | Crucial for standard quarterly reporting cycles |
 | `weekend_flag` | Integer | `1` if order date was Saturday or Sunday, `0` otherwise | Segments weekend shopping patterns |
 | `profit_margin` | Double | `(Profit / Sales) * 100` rounded to 2 decimals | Direct measure of profit efficiency per order |
+| `temp_c` | Double | Mean temperature in Celsius | Identifies weather severity and shifts |
+| `precipitation_mm` | Double | Precipitation in millimeters | Highlights daily rain impact |
+| `snowfall_cm` | Double | Snowfall in centimeters | Highlights winter weather disruption |
+| `wind_speed_kmh` | Double | Max wind speed in km/h | Measures wind severity |
+| `is_raining` | Integer | `1` if daily precipitation > 0.0, `0` otherwise | Identifies rainfall days |
+| `is_snowing` | Integer | `1` if daily snowfall > 0.0, `0` otherwise | Identifies snowfall days |
+| `extreme_weather_flag` | Integer | `1` if precipitation > 25mm OR snowfall > 5cm OR wind > 40km/h, `0` otherwise | Flag for severe, potentially disruptive weather |
 
 ---
 
