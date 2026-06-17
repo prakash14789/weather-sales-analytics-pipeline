@@ -379,12 +379,22 @@ def main():
 
     # 5. Load Holiday data
     print("Loading holiday data from JSON...")
-    holiday_df = (
-        spark.read
-        .option("multiline", "true")
-        .json("data/raw/api/holidays.json")
-    )
-    holidays_df = prepare_holidays(holiday_df)
+    try:
+        holiday_df = (
+            spark.read
+            .option("multiline", "true")
+            .json("data/raw/api/holidays.json")
+        )
+        holidays_df = prepare_holidays(holiday_df)
+        print("Holiday data loaded successfully.")
+    except Exception as e:
+        print(f"Warning: Could not load/parse holiday data: {e}")
+        from pyspark.sql.types import StructType, StructField, StringType, DateType
+        schema = StructType([
+            StructField("holiday_name", StringType(), True),
+            StructField("holiday_date", DateType(), True)
+        ])
+        holidays_df = spark.createDataFrame([], schema)
 
     # 6. Join Sales + Customer + Holidays
     print("Joining holidays...")

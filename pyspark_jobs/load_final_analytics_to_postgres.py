@@ -24,12 +24,15 @@ def main():
         print("Error: No processed final analytics CSV file found under data/processed/final_analytics/")
         sys.exit(1)
         
-    csv_path = csv_files[0]
-    print(f"Located processed CSV: {csv_path}")
+    print(f"Located {len(csv_files)} processed CSV part files.")
     
-    # Read CSV data into Pandas
-    print("Reading CSV data...")
-    df = pd.read_csv(csv_path)
+    # Read CSV data into Pandas and concatenate
+    print("Reading and concatenating CSV data...")
+    df_list = []
+    for f in csv_files:
+        print(f"Reading {f}...")
+        df_list.append(pd.read_csv(f))
+    df = pd.concat(df_list, ignore_index=True)
     
     # Clean and rename column names to lowercase snake_case
     print("Renaming and formatting columns...")
