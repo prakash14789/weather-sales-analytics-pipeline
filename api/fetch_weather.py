@@ -57,28 +57,11 @@ def format_weather_response(region_name, response_json):
     return records
 
 def main():
-    all_weather_records = []
-    
-    for region_name, info in REGIONS.items():
-        print(f"Fetching weather for {region_name} ({info['city']})...")
-        status_code, data = fetch_weather_for_region(info["lat"], info["lon"])
-        print(f"Status Code ({region_name}): {status_code}")
-        
-        if status_code == 200 and data:
-            records = format_weather_response(region_name, data)
-            print(f"Formatted {len(records)} daily records for {region_name}")
-            all_weather_records.extend(records)
-        else:
-            print(f"Failed to fetch data for region {region_name}")
-
-    if all_weather_records:
-        os.makedirs("data/raw/api", exist_ok=True)
-        output_path = "data/raw/api/weather.json"
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(all_weather_records, f, indent=4, ensure_ascii=False)
-        print(f"\nSaved {len(all_weather_records)} weather records to {output_path}")
-    else:
-        print("No weather records were fetched. File not written.")
+    print("[DEPRECATION WARNING] Running this script directly is deprecated.")
+    print("Please use: python run_pipeline.py --step ingest")
+    print("Delegating to src.ingestion.run_weather_ingestion...\n")
+    from src.ingestion import run_weather_ingestion
+    run_weather_ingestion(REGIONS)
 
 if __name__ == "__main__":
     main()

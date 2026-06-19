@@ -71,46 +71,11 @@ def filter_and_deduplicate(holidays, sales_holidays=SALES_HOLIDAYS):
     return unique
 
 def main():
-    all_holidays = []
-
-    for year in years:
-        print(f"\nFetching holidays for {year}...")
-        status_code, data = fetch_holidays_from_api(API_KEY, year)
-        print(f"Status Code ({year}):", status_code)
-
-        if status_code == 200 and data:
-            holidays = data.get("response", {}).get("holidays", [])
-            unique = filter_and_deduplicate(holidays)
-            print(f"{year}: {len(unique)} sales holidays found")
-            for h in unique:
-                print(f"  - {h['date']['iso']}  {h['name']}")
-            all_holidays.extend(unique)
-        else:
-            print(f"Failed for year {year}")
-            if data:
-                print(data)
-
-    output = {
-        "holidays": all_holidays
-    }
-
-    os.makedirs("data/raw/api", exist_ok=True)
-    with open(
-        "data/raw/api/holidays.json",
-        "w",
-        encoding="utf-8"
-    ) as file:
-        json.dump(
-            output,
-            file,
-            indent=4,
-            ensure_ascii=False
-        )
-
-    print("\n===================================")
-    print(f"Total Sales Holidays Saved: {len(all_holidays)}")
-    print("Saved to: data/raw/api/holidays.json")
-    print("===================================")
+    print("[DEPRECATION WARNING] Running this script directly is deprecated.")
+    print("Please use: python run_pipeline.py --step ingest")
+    print("Delegating to src.ingestion.run_holiday_ingestion...\n")
+    from src.ingestion import run_holiday_ingestion
+    run_holiday_ingestion(API_KEY, years)
 
 if __name__ == "__main__":
     main()

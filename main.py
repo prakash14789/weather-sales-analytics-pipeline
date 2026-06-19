@@ -1,28 +1,15 @@
-import pandas as pd
+import sys
+import os
 
-df = pd.read_csv(
-    "data/raw/csv/Sample - Superstore.csv",
-    encoding="latin1"
-)
+# Ensure project root is in path
+sys.path.append(os.path.abspath("."))
 
-customers = df[
-    [
-        "Customer ID",
-        "Customer Name",
-        "Segment",
-        "Country",
-        "City",
-        "State",
-        "Postal Code",
-        "Region"
-    ]
-].drop_duplicates()
+def main():
+    print("[DEPRECATION WARNING] Running main.py directly is deprecated.")
+    print("Please use: python run_pipeline.py --step extract-customers")
+    print("Delegating to src.database.extract_customers...\n")
+    from src.database import extract_customers
+    extract_customers()
 
-print("Customer Records:", len(customers))
-
-customers.to_csv(
-    "data/processed/customers.csv",
-    index=False
-)
-
-print("customers.csv created successfully")
+if __name__ == "__main__":
+    main()
