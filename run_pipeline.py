@@ -15,6 +15,8 @@ from src.database import (
     fetch_customer_dim
 )
 from src.spark import run_feature_engineering
+from src.validation import run_validation_suite
+
 
 def print_separator(char="=", length=60):
     print(char * length)
@@ -58,6 +60,7 @@ def main():
             "load-customers",
             "spark-etl",
             "load-analytics",
+            "validate-data",
             "export-customer-dim"
         ],
         default="all",
@@ -75,7 +78,8 @@ def main():
             ("extract-customers", extract_customers,),
             ("load-customers", load_customers_to_postgres,),
             ("spark-etl", run_feature_engineering,),
-            ("load-analytics", load_final_analytics_to_postgres,)
+            ("load-analytics", load_final_analytics_to_postgres,),
+            ("validate-data", run_validation_suite,)
         ]
     elif args.step == "ingest":
         steps_to_run = [
@@ -90,6 +94,8 @@ def main():
         steps_to_run = [("spark-etl", run_feature_engineering,)]
     elif args.step == "load-analytics":
         steps_to_run = [("load-analytics", load_final_analytics_to_postgres,)]
+    elif args.step == "validate-data":
+        steps_to_run = [("validate-data", run_validation_suite,)]
     elif args.step == "export-customer-dim":
         steps_to_run = [("export-customer-dim", fetch_customer_dim,)]
 
