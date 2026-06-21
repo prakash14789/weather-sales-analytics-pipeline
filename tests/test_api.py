@@ -30,7 +30,8 @@ def test_fetch_holidays_from_api_success():
         assert status_code == 200
         assert result == mock_response_data
         mock_get.assert_called_once_with(
-            "https://calendarific.com/api/v2/holidays?api_key=dummy_api_key&country=US&year=2014"
+            "https://calendarific.com/api/v2/holidays?api_key=dummy_api_key&country=US&year=2014",
+            timeout=30
         )
 
 def test_fetch_holidays_from_api_failure():
