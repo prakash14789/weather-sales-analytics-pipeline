@@ -1,354 +1,260 @@
-# Retail Holiday Sales Analytics Pipeline
+# 🛍️ Retail Holiday Sales Analytics Pipeline
 
-An end-to-end data engineering pipeline designed to analyze the impact of key US holidays on retail sales. The pipeline ingests sales records from a raw dataset, fetches calendar events via a REST API, connects to a PostgreSQL database to query customer dimension data, and uses Apache PySpark to clean, join, and engineer features into a final analytics-ready dataset.
+[![Data Quality Suite](https://img.shields.io/badge/Data_Quality-Validator-10b981?style=flat-square)](#-data-quality--validation-suite)
+[![PySpark](https://img.shields.io/badge/Apache_Spark-PySpark-E25A28?style=flat-square&logo=apachespark)](#-spark-etl--feature-engineering)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-336791?style=flat-square&logo=postgresql)](#-database-schema--ddl)
+[![Tests Passed](https://img.shields.io/badge/Tests-22_Passed-success?style=flat-square)](#-running-the-test-suite)
 
----
-
-## Table of Contents
-1. [Architecture & Data Flow](#architecture--data-flow)
-2. [Prerequisites](#prerequisites)
-3. [Project Directory Structure](#project-directory-structure)
-4. [File Meanings & Rationale](#file-meanings--rationale)
-5. [Step-by-Step Run Procedure](#step-by-step-run-procedure)
-6. [Feature Engineering Details](#feature-engineering-details)
-7. [Troubleshooting](#troubleshooting)
+An end-to-end, production-grade data engineering pipeline designed to analyze how US holidays and regional weather affect retail sales performance. The pipeline ingests raw transaction sales data, fetches US holiday metadata via the Calendarific REST API, integrates historical weather conditions using the Open-Meteo API, synchronizes database schemas, and processes it all using Apache PySpark to generate feature-engineered datasets for analytics and machine learning.
 
 ---
 
-## Architecture & Data Flow
+## 🗺️ Architecture & Data Flow
 
-The pipeline integrates data from four distinct source systems:
-1. **Raw CSV**: Flat-file transaction data containing retail orders, profits, and customer IDs.
-2. **REST API (Calendarific)**: Dynamically requested holiday calendars from the [Calendarific API](https://calendarific.com/).
-3. **REST API (Open-Meteo)**: Historical weather archive data representing the region's climate matching customer locations.
-4. **Relational Database (PostgreSQL)**: Customer master/dimension table queried via JDBC.
+The pipeline automatically merges and processes four main sources of data:
+1. **Staging Sales Ledger (`Sample - Superstore.csv`)**: CSV record of orders, profit, customer details, and transaction dates.
+2. **Calendarific API (REST)**: Dynamic calendar metadata used to identify US holidays (e.g. Valentine's Day, Memorial Day, Christmas).
+3. **Open-Meteo API (REST)**: Historic daily weather metrics (temp, snow, precipitation) matching customer regions.
+4. **PostgreSQL Database**: Relational database warehouse storing unique customer dimensions and the final consolidated tables.
 
-### Pipeline Diagram
+### Data Flow Diagram
 
 ```mermaid
 graph TD
     %% Source Ingestion
-    API[Calendarific API] -->|fetch_holidays.py| RawJSON(data/raw/api/holidays.json)
-    WeatherAPI[Open-Meteo API] -->|fetch_weather.py| RawWeatherJSON(data/raw/api/weather.json)
-    RawCSV[Sample - Superstore.csv] -->|main.py| ProcessedCust(data/processed/customers.csv)
+    API[Calendarific API] -->|run_pipeline.py --step ingest| RawJSON(data/raw/api/holidays.json)
+    WeatherAPI[Open-Meteo API] -->|run_pipeline.py --step ingest| RawWeatherJSON(data/raw/api/weather.json)
+    RawCSV[Sample - Superstore.csv] -->|run_pipeline.py --step extract-customers| ProcessedCust(data/processed/customers.csv)
     
     %% Database Loading
-    ProcessedCust -->|load_customers_to_postgres.py| PostgresCust[(PostgreSQL: customers table)]
-    PostgresCust -->|SQL DDL / SELECT DISTINCT| PostgresDim[(PostgreSQL: customer_dim table)]
+    ProcessedCust -->|run_pipeline.py --step load-customers| PostgresCust[(PostgreSQL: customers table)]
+    PostgresCust -->|Automated SQL execution| PostgresDim[(PostgreSQL: customer_dim table)]
 
     %% PySpark ETL Job
-    RawCSV -->|spark.read.csv| SparkETL[pyspark_jobs/feature_engineering.py]
-    PostgresDim -->|JDBC Connection: postgresql-42.7.11.jar| SparkETL
+    RawCSV -->|spark.read.csv| SparkETL[src/spark.py - Spark Session]
+    PostgresDim -->|JDBC Connection| SparkETL
     RawJSON -->|spark.read.json| SparkETL
     RawWeatherJSON -->|spark.read.json| SparkETL
 
-    %% Output Generation
-    SparkETL -->|Data Cleaning, Joins, and Feature Engineering| OutCSV[data/processed/final_analytics/part-00000-*.csv]
-    PostgresDim -->|fetch_customer_dim.py| ProcDimCSV(data/processed/customer_dim.csv)
-    OutCSV -->|load_final_analytics_to_postgres.py| PostgresFinal[(PostgreSQL: final_analytics table)]
+    %% Output Generation & Validation
+    SparkETL -->|ETL & Feature Engineering| OutCSV[data/processed/final_analytics/part-*.csv]
+    OutCSV -->|run_pipeline.py --step load-analytics| PostgresFinal[(PostgreSQL: final_analytics table)]
+    OutCSV -->|run_pipeline.py --step validate-data| ReportHTML(data/processed/validation_report.html)
+    PostgresDim -->|run_pipeline.py --step export-customer-dim| ProcDimCSV(data/processed/customer_dim.csv)
 ```
 
 ---
 
-## Prerequisites
+## 🛠️ Step 1: Install System Prerequisites (Foolproof Windows Guide)
 
-Before running the project on your local machine, ensure you have the following prerequisites installed and configured:
+If you are on Windows, follow these click-by-click instructions. If you miss these, PySpark will crash.
 
-### 1. Python 3.8+
-Make sure Python is installed. You can check your version by running:
-```bash
-python --version
-```
+### 1. Install Java (JDK 8 or 11)
+Apache Spark runs on Java. You need Java Development Kit 8 or 11.
+1. Download **JDK 11** (e.g., from [Eclipse Temurin/Adoptium](https://adoptium.net/)) and install it.
+2. Remember where it was installed (usually `C:\Program Files\Eclipse Foundation\jdk-11.x.x` or `C:\Program Files\Java\jdk1.8.x`).
+3. Set your system environment variable:
+   * Press your Windows Keyboard key, search for **"Edit the system environment variables"**, and open it.
+   * Click the **Environment Variables...** button at the bottom.
+   * Under the **System Variables** block, click **New...**.
+   * Variable Name: `JAVA_HOME`
+   * Variable Value: Paste your JDK installation directory path here (e.g., `C:\Program Files\Eclipse Foundation\jdk-11.0.22`).
+   * Click **OK**.
 
-### 2. Java Development Kit (JDK 8 or JDK 11)
-Apache Spark requires Java to run.
-* Install Java JDK 8 or 11 (e.g., OpenJDK or Oracle JDK).
-* Ensure the `JAVA_HOME` environment variable is set in your system environment variables pointing to your JDK installation path.
-* Check installation by running:
-  ```bash
-  java -version
-  ```
+### 2. Configure Apache Hadoop Winutils
+Apache Spark requires Hadoop native binaries on Windows to write files to your local hard drive.
+1. Create a folder named `hadoop` directly on your C drive: `C:\hadoop`.
+2. Inside `C:\hadoop`, create a folder named `bin` (so you have `C:\hadoop\bin`).
+3. Download **Hadoop 3.0.0** binaries (`winutils.exe` and `hadoop.dll`) from a trusted source (such as the [cdarlint/winutils GitHub Repository](https://github.com/cdarlint/winutils/tree/master/hadoop-3.0.0/bin)).
+4. Move/copy both `winutils.exe` and `hadoop.dll` into your newly created `C:\hadoop\bin` folder.
+5. Add the variables to Windows:
+   * Open the **Environment Variables** panel again.
+   * Under **System Variables**, click **New...**.
+   * Variable Name: `HADOOP_HOME`
+   * Variable Value: `C:\hadoop`
+   * Click **OK**.
+   * Next, in **System Variables**, find the variable named `Path`, select it, and click **Edit...**.
+   * Click **New** on the right side.
+   * Type in: `%HADOOP_HOME%\bin`
+   * Click **New** again, and type in: `%JAVA_HOME%\bin`
+   * Click **OK** to close all panels.
 
-### 3. Apache Hadoop Winutils (For Windows Users)
-Because Spark is built on Hadoop, Windows environments require the Hadoop native binaries (`winutils.exe` and `hadoop.dll`) to interact with the local file system without throwing exceptions.
-* Create a folder named `C:\hadoop` and a subfolder `C:\hadoop\bin`.
-* Download `winutils.exe` and `hadoop.dll` for Hadoop version **3.0.0** or **3.3.0** (e.g., from the trusted [cdarlint/winutils Github Repository](https://github.com/cdarlint/winutils)).
-* Place both files inside `C:\hadoop\bin`.
-* Set your system environment variable `HADOOP_HOME` to `C:\hadoop`, and add `C:\hadoop\bin` to your system `PATH`.
-> [!NOTE]
-> The final feature engineering job dynamically configures `HADOOP_HOME` inline, but having the physical files in `C:\hadoop\bin` is strictly required.
-
-### 4. PostgreSQL Database
-The project stores customer master data in PostgreSQL.
-* Install PostgreSQL (v12 or higher).
-* Ensure PostgreSQL service is running.
-* Create a database named `retail_dw`:
-  ```sql
-  CREATE DATABASE retail_dw;
-  ```
-
-### 5. Calendarific API Key
-The pipeline dynamically fetches US holiday metadata from Calendarific.
-* Sign up for a free developer account at [Calendarific](https://calendarific.com/).
-* Obtain your free API Key from the Calendarific dashboard.
-
----
-
-## Project Directory Structure
-
-```text
-holiday_analytics_pipeline/
-├── .env                              # Environment secrets configuration (database & API key)
-├── .gitignore                        # Files and folders ignored by Git
-├── README.md                         # Project documentation and run guide (this file)
-├── main.py                           # Customer pre-processing extraction script (Pandas)
-├── requirements.txt                  # Python dependencies
-│
-├── api/
-│   ├── fetch_holidays.py             # Script to ingest holiday data from REST API
-│   └── fetch_weather.py              # Script to ingest historical weather data from API
-│
-├── config/
-│   └── config.py                     # Configuration loader module for database credentials
-│
-├── dashboards/                       # Interactive visualization layers
-│   ├── power_bi/                     # Power BI dashboard files and configuration
-│   └── tableau/                      # Tableau dashboard files and configuration
-│
-├── data/
-│   ├── raw/
-│   │   ├── csv/
-│   │   │   └── Sample - Superstore.csv  # Raw retail sales dataset
-│   │   └── api/
-│   │       ├── holidays.json         # Downloaded holiday data from API
-│   │       └── weather.json          # Downloaded weather data from API
-│   └── processed/
-│       ├── customers.csv             # Unique customers extracted from raw CSV
-│       ├── customer_dim.csv          # Exported customer dimension from PostgreSQL
-│       └── final_analytics/          # Spark destination directory for integrated analytics data
-│
-├── docs/
-│   └── screenshots/                  # (Placeholder) Reserved for documentation images
-│
-├── drivers/
-│   └── postgresql-42.7.11.jar        # PostgreSQL JDBC driver JAR for Apache Spark
-│
-├── notebooks/                        # (Placeholder) Reserved for Jupyter notebooks
-│
-├── pyspark_jobs/                     # PySpark scripts for ETL & feature engineering
-│   ├── test_spark.py                 # Spark environment diagnostic verification
-│   ├── load_data.py                  # PySpark raw sales metadata loader
-│   ├── prepare_holidays.py           # PySpark JSON holiday parser and flattener
-│   ├── data_cleaning.py              # PySpark data type casting and validation utility
-│   ├── data_integration.py           # Prototype join logic for Sales and Holidays
-│   ├── load_customers_to_postgres.py # Loads customer CSV into PostgreSQL 'customers' table
-│   ├── load_customers.py             # SQLAlchemy + Spark check on 'customers' table
-│   ├── read_customers_from_postgres.py # JDBC reading from 'customers' table in Spark
-│   ├── fetch_customer_dim.py         # Exports PostgreSQL 'customer_dim' to a CSV file
-│   ├── load_final_analytics_to_postgres.py # Loads feature engineered CSV into PostgreSQL final_analytics table
-│   └── feature_engineering.py        # The final pipeline executable joining CSV + JSON + JDBC
-│
-├── sql/
-│   ├── create_tables.sql             # SQL schema/DDL definitions (database setup)
-│   └── insert_customers.sql          # (Placeholder) Reserved for custom SQL insertions
-│
-└── tests/
-    ├── test_api.py                   # API testing suite for holiday data
-    ├── test_weather_api.py           # API testing suite for weather data
-    └── test_pyspark.py               # PySpark jobs testing suite
-```
+### 3. Install & Start PostgreSQL
+1. Download and install PostgreSQL (v12 or newer) from the [PostgreSQL Official Website](https://www.postgresql.org/download/windows/).
+2. Keep the default username as `postgres` and remember the password you set during installation.
+3. Once installed, open **pgAdmin 4** (the visual interface installed with PostgreSQL):
+   * Right-click on **Servers** -> **Register** -> **Server...** (or connect to your local server by clicking on it and entering your password).
+   * Right-click on **Databases** -> **Create** -> **Database...**.
+   * Database name: `retail_dw`
+   * Click **Save**.
 
 ---
 
-## File Meanings & Rationale
+## ⚙️ Step 2: Project setup
 
-Here is the purpose and rationale behind each of the core files created in the project:
-
-### 1. Root Configuration & Dependencies
-* **[requirements.txt](file:///c:/Users/mishr/holiday_analytics_pipeline/requirements.txt)**: Contains the exact list of required Python libraries (e.g. `pyspark`, `pandas`, `sqlalchemy`, `psycopg2-binary` for database interactions, `requests` for API calls, and `python-dotenv` for local environment variable resolution).
-* **[.env](file:///c:/Users/mishr/holiday_analytics_pipeline/.env)**: Houses external configuration secrets. It prevents API keys and database credentials from being committed to public repositories.
-* **[config/config.py](file:///c:/Users/mishr/holiday_analytics_pipeline/config/config.py)**: Loads variables from `.env` using python-dotenv. This decouples credential loading from operational PySpark scripts, keeping database connection strings clean.
-
-### 2. Pre-processing & API Ingestion
-* **[main.py](file:///c:/Users/mishr/holiday_analytics_pipeline/main.py)**: Reads the raw CSV file using Pandas, extracts unique customer rows based on their metadata (Customer ID, Name, Segment, City, etc.), and writes them to a processed customer CSV file.
-* **[api/fetch_holidays.py](file:///c:/Users/mishr/holiday_analytics_pipeline/api/fetch_holidays.py)**: Fetches holiday metadata from Calendarific's REST API for the years 2014–2017. It filters for sales-impacting holidays (like Thanksgiving, Christmas, Valentine's Day) and saves the raw response to `data/raw/api/holidays.json`.
-* **[api/fetch_weather.py](file:///c:/Users/mishr/holiday_analytics_pipeline/api/fetch_weather.py)**: Fetches historical daily weather statistics (mean temp, precipitation sum, snowfall sum, wind speed max) from Open-Meteo's Archive API for coordinates representing each major region (NYC, LA, Chicago, Atlanta) and saves it to `data/raw/api/weather.json`.
-
-### 3. Database Utility Scripts
-* **[pyspark_jobs/load_customers_to_postgres.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_customers_to_postgres.py)**: Establishes a connection to PostgreSQL using SQLAlchemy and writes the unique customer listings CSV directly into the `customers` table, replacing it if it already exists.
-* **[pyspark_jobs/load_customers.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_customers.py)**: Uses Pandas `read_sql` and SQLAlchemy to read the `customers` table and wraps it in a Spark DataFrame to inspect its contents.
-* **[pyspark_jobs/read_customers_from_postgres.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/read_customers_from_postgres.py)**: Connects to PostgreSQL directly inside Spark via JDBC format using the jar driver. This is standard practice in data engineering for processing database tables within PySpark.
-* **[pyspark_jobs/fetch_customer_dim.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/fetch_customer_dim.py)**: Extracts the relational customer dimension table (`customer_dim`) to `data/processed/customer_dim.csv` using Pandas.
-
-### 4. Spark Processing & Final ETL
-* **[drivers/postgresql-42.7.11.jar](file:///c:/Users/mishr/holiday_analytics_pipeline/drivers/postgresql-42.7.11.jar)**: The physical Java Archive database connector driver that allows Spark's JVM to communicate with PostgreSQL databases over JDBC.
-* **[pyspark_jobs/test_spark.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/test_spark.py)**: A diagnostic test script ensuring that local Apache Spark is configured and runs successfully.
-* **[pyspark_jobs/load_data.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_data.py)**: Loads raw superstore sales CSV into PySpark and displays the inferred schema.
-* **[pyspark_jobs/prepare_holidays.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/prepare_holidays.py)**: Evaluates the raw holidays JSON structure, extracting the arrays using PySpark's `explode` function to create a relational schema of dates, types, and holiday names.
-* **[pyspark_jobs/data_cleaning.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/data_cleaning.py)**: Validates raw data fields in the sales dataset by converting date strings to proper date formats, casting money and quantities to numeric formats, and logging missing or duplicate records.
-* **[pyspark_jobs/data_integration.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/data_integration.py)**: Integrates the cleaned Sales dataset with the Holidays dataset to analyze orders placed on specific holiday dates.
-* **[pyspark_jobs/feature_engineering.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/feature_engineering.py)**: **The final pipeline orchestrator**. It integrates Sales CSV, PostgreSQL JDBC customer dimensions (`customer_dim`), and Holidays API JSON. It performs multi-dataset joins, handles schema mappings, cleans data, engineers holiday features, and outputs a single clean dataset to `data/processed/final_analytics/`.
-* **[pyspark_jobs/load_final_analytics_to_postgres.py](file:///c:/Users/mishr/holiday_analytics_pipeline/pyspark_jobs/load_final_analytics_to_postgres.py)**: Loads the final analytical dataset from the local filesystem (`data/processed/final_analytics/`) directly into the `final_analytics` table in the PostgreSQL database using Pandas and SQLAlchemy. It formats column names to lowercase snake_case and ensures date columns are loaded with correct datatypes.
-
----
-
-## Step-by-Step Run Procedure
-
-Follow this guide to run the pipeline end-to-end on your local system:
-
-### Step 1: Set Up Project Environment
-Open a terminal (e.g., PowerShell on Windows) in the project directory:
-
-1. **Create Virtual Environment:**
+1. Open your terminal (e.g., PowerShell on Windows) inside this project folder:
+   ```powershell
+   cd holiday_analytics_pipeline
+   ```
+2. **Create a Virtual Environment**:
    ```bash
    python -m venv venv
    ```
-2. **Activate Environment:**
-   * **Windows PowerShell:**
+3. **Activate the Virtual Environment**:
+   * **PowerShell**:
      ```powershell
      .\venv\Scripts\Activate.ps1
      ```
-   * **Windows CMD:**
+   * **Windows CMD Prompt**:
      ```cmd
      .\venv\Scripts\activate.bat
      ```
-   * **Linux/macOS:**
+   * **Linux/macOS terminal**:
      ```bash
      source venv/bin/activate
      ```
-3. **Install Dependencies:**
+4. **Install Required Libraries**:
    ```bash
    pip install -r requirements.txt
    ```
 
-### Step 2: Configure Environment Secret Variables
-Create a file named `.env` in the root folder of the project (`holiday_analytics_pipeline/`) and fill it out:
+---
+
+## 🔑 Step 3: Get your API Key & Configuration
+
+1. Go to [Calendarific API](https://calendarific.com/) and register for a free account.
+2. Log in and copy your **API Key** from the developer dashboard.
+3. In the root directory of this project, create a text file named exactly `.env`.
+4. Copy and paste the lines below into it, substituting your actual PostgreSQL password and Calendarific API Key:
+
 ```ini
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=retail_dw
 DB_USER=postgres
-DB_PASSWORD=YOUR_POSTGRES_PASSWORD
+DB_PASSWORD=your_postgres_password_here
 
-CALENDARIFIC_API_KEY=YOUR_CALENDARIFIC_API_KEY
+CALENDARIFIC_API_KEY=your_calendarific_api_key_here
 ```
-
-### Step 3: Initialize PostgreSQL Database & Tables
-1. Connect to PostgreSQL and create the `retail_dw` database:
-   ```sql
-   CREATE DATABASE retail_dw;
-   ```
-2. Make sure you connect to `retail_dw` and execute the following DDL commands to create the customer dimension table (`customer_dim`):
-   ```sql
-   -- Create customer_dim table (dimension table)
-   CREATE TABLE IF NOT EXISTS customer_dim (
-       customer_id VARCHAR(50) PRIMARY KEY,
-       customer_name VARCHAR(100),
-       segment VARCHAR(50),
-       city VARCHAR(100),
-       state VARCHAR(100),
-       region VARCHAR(50)
-   );
-   ```
-
-### Step 4: Run Data Ingestion & SQL Population Scripts
-Run the pipeline scripts in the following exact sequence:
-
-1. **Ingest Holiday Data (API):**
-   Calls the Calendarific API and populates `data/raw/api/holidays.json`.
-   ```bash
-   python api/fetch_holidays.py
-   ```
-
-2. **Ingest Weather Data (API):**
-   Calls the Open-Meteo Archive API and populates `data/raw/api/weather.json`.
-   ```bash
-   python api/fetch_weather.py
-   ```
-
-3. **Extract Customers from Sales CSV:**
-   Creates `data/processed/customers.csv`.
-   ```bash
-   python main.py
-   ```
-
-4. **Load Extracted Customers to PostgreSQL:**
-   Automatically creates the `customers` table in the database and loads the CSV data.
-   ```bash
-   python pyspark_jobs/load_customers_to_postgres.py
-   ```
-
-5. **Populate Customer Dimension Table:**
-   Run the following query in your PostgreSQL database to populate `customer_dim` with unique customer profiles:
-   ```sql
-   -- Run in PostgreSQL tool (e.g. pgAdmin, psql, or DBeaver) inside 'retail_dw' database
-   INSERT INTO customer_dim (customer_id, customer_name, segment, city, state, region)
-   SELECT DISTINCT ON (customer_id) customer_id, customer_name, segment, city, state, region
-   FROM customers;
-   ```
-   *Note: This generates exactly 793 distinct records matching customer profiles.*
 
 ---
 
-### Step 5: Run the Spark Analytics Pipeline
-Run the main ETL Spark pipeline which joins the datasets, engineers analytics features, and saves the result:
-```bash
-python pyspark_jobs/feature_engineering.py
-```
+## 🚀 Step 4: Run the Pipeline (Step-by-Step)
 
-### Step 6: Load Final Analytics to PostgreSQL
-Load the feature-engineered final CSV data into the PostgreSQL `final_analytics` table:
-```bash
-python pyspark_jobs/load_final_analytics_to_postgres.py
-```
-Result: Reads the generated CSV file, cleans and formats column names to lowercase snake_case, casts dates appropriately, and creates/replaces the `final_analytics` table in PostgreSQL.
+The entire pipeline is run using the master script `run_pipeline.py`. When you run steps, the code handles database schema creation, staging, and integrations automatically!
 
-### Step 7: Verify Outputs
-Once the scripts complete successfully, check the following outputs:
-* **Spark Final Output:** Look inside `data/processed/final_analytics/`. You should see a successful run indicated by a `_SUCCESS` file and a large `.csv` data partition file (containing the final merged, feature-engineered table).
-* **PostgreSQL final_analytics Table:** Verify that the `final_analytics` table exists and is populated in your `retail_dw` database.
-* **Exported PostgreSQL Check:** (Optional) Run the fetch script to download the database's dimension table into a local file:
-  ```bash
-  python pyspark_jobs/fetch_customer_dim.py
-  ```
-  This creates `data/processed/customer_dim.csv` on your filesystem.
+### Option A: Run Everything Automatically in One Command
+This command runs all steps sequentially from raw APIs to database loading and data quality validation:
+```bash
+python run_pipeline.py --step all
+```
 
 ---
 
-## Feature Engineering Details
+### Option B: Run Steps Manually (One by One)
 
-The feature engineering job (`pyspark_jobs/feature_engineering.py`) adds the following columns to help build machine learning models or run downstream sales reports:
+If you prefer to run steps individually to monitor each stage:
 
-| Column Name | Data Type | Description | Rationale / Source |
+#### 1. Ingest Holiday and Weather APIs
+Downloads API results and writes JSON files to `data/raw/api/`:
+```bash
+python run_pipeline.py --step ingest
+```
+
+#### 2. Extract Customers
+Pulls unique customer details out of the large retail CSV file:
+```bash
+python run_pipeline.py --step extract-customers
+```
+
+#### 3. Load Customers (Automatically Sets Up PostgreSQL Tables)
+Writes extracted customers into PostgreSQL. 
+* **Note**: Under the hood, this step automatically reads [sql/create_tables.sql](file:///c:/Users/mishr/holiday_analytics_pipeline/sql/create_tables.sql) to build the database schema and [sql/insert_customers.sql](file:///c:/Users/mishr/holiday_analytics_pipeline/sql/insert_customers.sql) to upsert entries into the `customer_dim` table. **No manual SQL copying is needed.**
+```bash
+python run_pipeline.py --step load-customers
+```
+
+#### 4. Run PySpark Feature Engineering
+Starts the PySpark processing engine to clean the transactional logs, fetch variables from the database over JDBC, parse API JSON logs, join tables, and write analytical features to your disk:
+```bash
+python run_pipeline.py --step spark-etl
+```
+
+#### 5. Load Final Analytical Features into PostgreSQL
+Reads PySpark part CSV outputs and uploads the final dataset to the `final_analytics` table in the database:
+```bash
+python run_pipeline.py --step load-analytics
+```
+
+#### 6. Validate Data & View HTML Report
+Performs quality audits against all files and databases:
+```bash
+python run_pipeline.py --step validate-data
+```
+* **To View Report**: Navigate to the project directory, go to `data/processed/`, and double-click [validation_report.html](file:///c:/Users/mishr/holiday_analytics_pipeline/data/processed/validation_report.html) to open it in Chrome, Edge, or Firefox.
+
+---
+
+## 🔍 Data Quality Expectations & Rules
+
+The custom verification script (`src/validation.py`) enforces strict assertions inspired by Great Expectations:
+* **Staging Sales**: Columns structure, non-null transactions, sales boundary checks ($\ge 0$), and order quantities ($\ge 1$).
+* **Holidays API JSON**: Verifies dates are correct format and bounds lie between 2014 and 2017.
+* **Weather API JSON**: Assures coordinates map to valid Central/East/South/West regions and temperatures are within boundaries ($-50^\circ\text{C}$ to $50^\circ\text{C}$).
+* **Feature Store Output**: Confirms engineered columns (rolling average sales, seasonal markers, extreme weather flags) are correct types and contain no unexpected nulls.
+
+---
+
+## 🧪 Running the Test Suite
+
+We write unit tests to ensure that parsing and transformations execute flawlessly. To run the tests without encountering search path failures, execute:
+
+```bash
+python -m pytest tests/
+```
+
+* **[tests/test_api.py](file:///c:/Users/mishr/holiday_analytics_pipeline/tests/test_api.py)**: Audits holiday response parser and holiday filter arrays.
+* **[tests/test_weather_api.py](file:///c:/Users/mishr/holiday_analytics_pipeline/tests/test_weather_api.py)**: Audits weather coordinates mapper and response format parsing.
+* **[tests/test_validation.py](file:///c:/Users/mishr/holiday_analytics_pipeline/tests/test_validation.py)**: Validates assertion checkers in the quality suite.
+* **[tests/test_pyspark.py](file:///c:/Users/mishr/holiday_analytics_pipeline/tests/test_pyspark.py)**: Audits Spark window functions, column cast operations, and join logic.
+
+---
+
+## 📊 Feature Store Glossary
+
+These columns are produced by the Spark ETL pipeline (`src/spark.py`) for downstream ML models and visual dashboards:
+
+| Column Name | Type | Description | Purpose |
 | :--- | :--- | :--- | :--- |
-| `holiday_name` | String | Name of the holiday (e.g. Thanksgiving) | Injected from API calendar match |
-| `holiday_flag` | Integer | `1` if the order was placed on a holiday, `0` otherwise | Identifies sales volume shifts during holidays |
-| `month` | Integer | Month of the transaction (1-12) | Allows seasonal analysis |
-| `year` | Integer | Year of the transaction (2014-2017) | Allows year-over-year growth comparisons |
-| `quarter` | Integer | Quarter of the year (1-4) | Crucial for standard quarterly reporting cycles |
-| `weekend_flag` | Integer | `1` if order date was Saturday or Sunday, `0` otherwise | Segments weekend shopping patterns |
-| `profit_margin` | Double | `(Profit / Sales) * 100` rounded to 2 decimals | Direct measure of profit efficiency per order |
-| `temp_c` | Double | Mean temperature in Celsius | Identifies weather severity and shifts |
-| `precipitation_mm` | Double | Precipitation in millimeters | Highlights daily rain impact |
-| `snowfall_cm` | Double | Snowfall in centimeters | Highlights winter weather disruption |
-| `wind_speed_kmh` | Double | Max wind speed in km/h | Measures wind severity |
-| `is_raining` | Integer | `1` if daily precipitation > 0.0, `0` otherwise | Identifies rainfall days |
-| `is_snowing` | Integer | `1` if daily snowfall > 0.0, `0` otherwise | Identifies snowfall days |
-| `extreme_weather_flag` | Integer | `1` if precipitation > 25mm OR snowfall > 5cm OR wind > 40km/h, `0` otherwise | Flag for severe, potentially disruptive weather |
+| `holiday_name` | String | Name of the holiday (e.g. Valentine's Day) | Details specific holiday |
+| `holiday_flag` | Integer | `1` on a holiday, `0` otherwise | Identifies direct holiday orders |
+| `month` / `year` / `quarter` | Integer | Time dimension keys | Temporal analysis grouping |
+| `weekend_flag` | Integer | `1` if ordered on Sat/Sun, `0` otherwise | Segment shopping patterns |
+| `profit_margin` | Double | `(Profit / Sales) * 100` rounded to 2 decimals | Order profit margin ratio |
+| `temp_c` | Double | Average region temperature in Celsius | Climatic demand impacts |
+| `precipitation_mm` | Double | Daily precipitation sum in mm | Rainy weather impact |
+| `snowfall_cm` | Double | Daily snowfall sum in cm | Winter weather disruption |
+| `wind_speed_kmh` | Double | Max daily wind speed in km/h | Severe wind velocity |
+| `is_raining` / `is_snowing` | Integer | `1` if precip/snowfall > 0, `0` otherwise | Boolean indicator variables |
+| `extreme_weather_flag` | Integer | `1` if precip > 25mm OR snow > 5cm OR wind > 40kmh | Highlights severe disruptions |
+| `days_until_next_holiday` | Integer | Count of days leading to next US holiday | Captures pre-holiday shopping rush |
+| `days_since_last_holiday` | Integer | Count of days elapsed since previous US holiday | Captures post-holiday patterns |
+| `holiday_shopping_season_flag` | Integer | `1` between Black Friday and Christmas, `0` otherwise | Highlights peak US retail period |
+| `rolling_sales_7d` | Double | 7-day rolling window sum of region sales | Captures region short-term demand |
+| `rolling_sales_30d` | Double | 30-day rolling window sum of region sales | Captures region long-term demand |
 
 ---
 
-## Troubleshooting
+## ⚠️ Troubleshooting FAQ
 
-### Issue 1: `java.io.IOException: Could not locate executable C:\hadoop\bin\winutils.exe`
-* **Cause**: Missing Hadoop native binary dependencies on Windows.
-* **Solution**: Download the Windows Hadoop support binaries `winutils.exe` and `hadoop.dll` for Hadoop 3.x and place them inside `C:\hadoop\bin\`. Ensure your environment variables `HADOOP_HOME` is set to `C:\hadoop`.
+### Q1: `java.io.IOException: Could not locate executable C:\hadoop\bin\winutils.exe`
+* **Cause**: Apache Spark requires a Hadoop execution simulation environment on Windows.
+* **Solution**: Go back to **Step 1.2** of the prerequisites. Verify you created `C:\hadoop\bin`, downloaded `winutils.exe` and `hadoop.dll`, and set up both `HADOOP_HOME` and system `Path` environment variables. Restart your terminal before running.
 
-### Issue 2: `py4j.protocol.Py4JJavaError: An error occurred while calling oXX.load` or JDBC driver not found
-* **Cause**: Spark cannot find the PostgreSQL JDBC driver JAR.
-* **Solution**: Ensure that `drivers/postgresql-42.7.11.jar` is present in the repository root. Double-check that `feature_engineering.py` has the line:
-  `config("spark.jars", "drivers/postgresql-42.7.11.jar")` properly uncommented and correctly referenced.
+### Q2: `ModuleNotFoundError: No module named 'src'`
+* **Cause**: Pytest or Python does not know where to search for your package modules.
+* **Solution**: Avoid calling `pytest` directly. Instead, run `python -m pytest tests/` which automatically includes the root folder in your execution path.
 
-### Issue 3: Connection Refused in database connection
-* **Cause**: PostgreSQL is not running or credentials in `.env` are incorrect.
-* **Solution**: Start the PostgreSQL service, verify you created the `retail_dw` database, and double-check credentials in `.env`.
+### Q3: PostgreSQL connection errors (e.g. `connection refused` or `password authentication failed`)
+* **Cause**: PostgreSQL is either stopped, database `retail_dw` was not created, or passwords inside `.env` are mismatched.
+* **Solution**: Check that PostgreSQL Service is running inside Windows Services. Confirm you created the `retail_dw` database using pgAdmin, and check the spelling of your database password in the `.env` file.
